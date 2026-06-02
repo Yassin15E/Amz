@@ -1,50 +1,78 @@
 import asyncio
 from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
 # إعداد البوت
 TOKEN = '8896317088:AAGmpySKGgws_FZ0ftxeimj80B-ijcugX_0'
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-# --- القوائم الرئيسية ---
-def get_main_menu():
-    kb = [
-        [KeyboardButton(text="👤 حسابي"), KeyboardButton(text="💳 تجديد الاشتراك")],
-        [KeyboardButton(text="📈 الاستهلاك"), KeyboardButton(text="⚙️ الإعدادات")],
-        [KeyboardButton(text="🎧 الدعم الفني")]
-    ]
-    return ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+# قاعدة بيانات وهمية
+users_db = {"1001": {"name": "أحمد الليبي", "expiry": "2026-07-01", "balance": 50}}
 
-# --- الأوامر الأساسية ---
+# الحالات
+class AppStates(StatesGroup):
+    waiting_for_contract = State()
+    waiting_for_duration = State()
+    waiting_for_card = State()
+
+# القوائم
+main_kb = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton(text="👤 حسابي"), KeyboardButton(text="💳 تجديد الاشتراك")]
+], resize_keyboard=True)
+
+# 1. البدء
 @dp.message(Command("start"))
-async def cmd_start(message: Message):
-    await message.answer(
-        "مرحباً بك في أمازون ليبيا للاتصالات والتقنية.\n"
-        "الرجاء اختيار الخدمة المطلوبة من القائمة أدناه:",
-        reply_markup=get_main_menu()
-    )
+async def start(message: Message):
+    await message.answer("أهلاً بك في أمازون ليبيا. يرجى إدخال رقم العقد:", reply_markup=main_kb)
 
-# --- معالجة الأزرار ---
+# 2. الاستعلام عن الحساب
 @dp.message(F.text == "👤 حسابي")
-async def show_account(message: Message):
-    # هنا سيتم لاحقاً جلب البيانات من قاعدة البيانات باستخدام رقم العقد
-    await message.answer("🔍 **جاري استعلام بيانات العقد من السيرفر...**\n\nالاسم: [اسم المشترك]\nحالة الخدمة: فعال ✅")
+async def show_account(message: Message, state: FSMContext):
+    await message.answer("أدخل رقم العقد الخاص بك:")
+    await state.set_state(AppStates.waiting_for_contract)
 
+@dp.message(AppStates.waiting_for_contract)
+async def process_contract(message: Message, state: FSMContext):
+    contract = message.text
+    if contract in users_db:
+        user = users_db[contract]
+        await message.answer(f"✅ بياناتك:\nالاسم: {user['name']}\nانتهاء: {user['expiry']}\nرصيدك: {user['balance']} د.ل")
+        await state.update_data(contract=contract)
+    else:
+        await message.answer("❌ رقم العقد غير موجود.")
+    await state.clear()
+
+# 3. التجديد
 @dp.message(F.text == "💳 تجديد الاشتراك")
-async def renew_subscription(message: Message):
-    await message.answer("يرجى إدخال رقم كرت الشحن لتجديد اشتراكك:")
+async def ask_duration(message: Message, state: FSMContext):
+    await message.answer("اختر مدة التجديد (شهر / 3 أشهر / سنة):")
+    await state.set_state(AppStates.waiting_for_duration)
 
-@dp.message(F.text == "🎧 الدعم الفني")
-async def support_center(message: Message):
-    await message.answer("نحن هنا للمساعدة! تواصل مع فريقنا مباشرة عبر:\n📞 الهاتف: 021-XXXXXXX\n🌐 الموقع: www.amazon.ly")
+@dp.message(AppStates.waiting_for_duration)
+async def process_duration(message: Message, state: FSMContext):
+    duration = message.text
+    # حساب السعر الوهمي
+    price = 50 if "شهر" in duration else 150
+    await state.update_data(duration=duration, price=price)
+    await message.answer(f"المبلغ المطلوب: {price} د.ل. \nالآن، يرجى إدخال رقم كرت الشحن:")
+    await state.set_state(AppStates.waiting_for_card)
 
-# --- تشغيل البوت ---
+@dp.message(AppStates.waiting_for_card)
+async def process_card(message: Message, state: FSMContext):
+    card = message.text
+    if len(card) > 5: # محاكاة للتحقق من الكرت
+        data = await state.get_data()
+        await message.answer(f"🎉 تم تجديد الاشتراك بنجاح!\nالمدة: {data['duration']}\nتم خصم: {data['price']} د.ل")
+    else:
+        await message.answer("❌ رقم الكرت غير صحيح.")
+    await state.clear()
+
 async def main():
-    print("البوت يعمل الآن...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
